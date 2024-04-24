@@ -1,0 +1,2 @@
+# Sygnus
+ A pulse signal processing utility, given a CSV file with two columns (time [s], amplitude [v]), gives: Signal frequency and phase spectrum,  pulse rise, fall times, pulse lenght, pulse energy, area under pulse. It prints out the first 40 harmonics of the signal to a .csv file and also constructs a .asc file for implementing this model in LTSpice. This file contains 40 voltage sources connected together in series, aproximating the input signal. Originaly made for a CERN project.
