@@ -15,7 +15,7 @@ function [frequencies, P1_dB, phase, P2]= fftLog(signal, time)
     N = length(signal);
     
     % obliczenie transformaty fouriera
-    Y = fft(signal);
+    Y = fft(signal,N);
     P2 = abs(Y/N); 
     P1 = P2(1:floor(N/2)+1);
     P1(2:end-1) = 2*P1(2:end-1);  
@@ -38,8 +38,8 @@ end
 prompt = {'Proszę podać nazwę pliku csv, w folderze skryptu, do odczytu.'};
 dlgtitle = 'Nazwa wymagana.';
 dims = [1 35];
-%defaultin = "data.csv";
-defaultin = "HV1200.csv";
+defaultin = "data.csv";
+%defaultin = "HV1200.csv";
 filename=inputdlg(prompt, dlgtitle, dims, defaultin);
 % Odczyt danych z pliku csv, DOMYŚLNIE data.csv w lokalizacji skryptu.
 dataTable = readtable(filename{1});
@@ -133,21 +133,6 @@ signalPulse = signal(edgeRise1:edgeFall2);
 disp(pulseLength);
 
 %%obliczanie wycinka pliku, w którym mamy sygnał
-%{
-pierwotnie:
-windowStart = 2*maxIte - edgeFall2;
-windowEnd = edgeFall2;
-if(windowStart<0)
-    windowStart = 0;
-end
-if(windowEnd > length(time))
-    windowEnd = length(time);
-end
-
- uznano, że zbyt wąskie jest te okno, więc bierzemy maksymalnie duży
- wycinek orginalnego sygnału, wycentrowany na maksimum impulsu.
- Poniżej tworzenie wycinka sygnału, wycentrowanego na maksimum
-%}
 
 windowStart = 1;
 windowEnd = 2*maxIte;
@@ -184,6 +169,15 @@ blackmanPulse = blackmanPulse*blackmanNormalisationFactor;
 [f, P1_dB, phase] = fftLog(signal, time);
 [blackmanf, blackmanSpectrum, blackmanPhase, blackmanSpectrumLinear] = fftLog(blackmanPulse, towindowTime);
 
+%Wyznaczenie pasma -3dB
+
+blackmanfMax = max(blackmanSpectrumLinear);
+blackmanf3dB = blackmanfMax/sqrt(2);
+indices = find(blackmanf>=blackmanf3dB);
+blackman3dBMin=blackmanf(indices(1));
+blackman3dBMax=blackmanf(indices(end));
+
+
 % multiplot.........................................................
 figure;
 sgtitle("Analiza "+filename{1});
@@ -211,7 +205,7 @@ ylabel('Faza [deg]');
 
 % Spektrum w dB
 subplot(2, 2, 1);
-semilogx(blackmanf, blackmanSpectrum, 'o-');
+semilogx(blackmanf, blackmanSpectrum);
 title('Spectrum sygnału [dB]');
 xlabel('Częstotliwość [MHz]');
 ylabel('Natężenie [dB]');
@@ -235,16 +229,15 @@ ylabel('Faza [deg]');
 % Wykres orginalnego sygnału
 
 subplot(2, 2, 4);
-title('Sygnał Orginalny');
+
 plot(time, signalNoOffset);
+title('Sygnał Orginalny');
 xlabel('Czas [s]');
 ylabel('Natężenie');
 
-
-
 %%zapis wyników analizy do pliku....................................
-harmonicsN = 40;
-%outTable = [blackmanf(1:harmonicsN), blackmanSpectrum(1:harmonicsN), blackmanPhase(1:harmonicsN)];
+
+harmonicsN = 40; %liczba 
 
 outFile = fopen(filename{1}+"_out.txt","w+");
 fprintf(outFile,"%s\n",datetime("now"));
@@ -253,10 +246,11 @@ fprintf(outFile,"%s %g\n","Czas opadania [s]:", timeFallTime);
 fprintf(outFile,"%s %g\n","Czas trwania impulsu [s]:", pulseWidthTime);
 fprintf(outFile,"%s %g\n","Maksymalna amplituda impulsu [V]:", maxAmp);
 fprintf(outFile,"%s %g\n","Chwila maksimum sygnału [s]:", maxTime);
-fprintf(outFile,"%s %g %g\n","Energia impulsu dla 1 Ohm i 50 Ohm impedancji odbiornika impulsu[J]:", energy1Ohm, energy50Ohm);
+fprintf(outFile,"%s %g %g\n","Energia impulsu dla 1 Ohm i 50 Ohm impedancji odbiornika impulsu [J]:", energy1Ohm, energy50Ohm);
 fprintf(outFile,"%s %g\n","Pole powierzchni impulsu [V*s]:", area);
+fprintf(outFile,"%s %g \n","Pasmo -3dB [MHz]: ", blackman3dBMax/1000);
 fprintf(outFile,"Tableka harmonicznych: \n");
-fprintf(outFile,"%s\n","freq, amplitude [dB], phase []");
+fprintf(outFile,"%s\n","Częstotliwość [Hz], amplituda [dBV], amplituda [V], faza [°]");
 for i=1:harmonicsN
     fprintf(outFile,"%gM,%g,%g\n",blackmanf(i),blackmanSpectrum(i),mod(blackmanPhase(i),360));
 end
@@ -299,7 +293,7 @@ flag1 = "FLAG 128 ";
 flag2 = " 0";
 
 symbol1 = "SYMBOL voltage 128";
-symbol2 = [ "",
+symbol2 = [ " R0",
 "WINDOW 123 0 0 Left 0",
 "WINDOW 39 24 124 Left 2",
 "SYMATTR InstName V"
@@ -307,21 +301,10 @@ symbol2 = [ "",
 symbol2 = join(symbol2,newline);
 symbol3 = newline+"SYMATTR Value SINE(0";
 symbol3b = newline+"SYMATTR Value ";
-symbol4 = newline+"SYMATTR SpiceLine Rser=0";
-
+symbol4 = newline+"SYMATTR SpiceLine Rser=0"; %%ok
 
 %zapis do pliku symulacji do LTSpice................................
 fprintf(ascFile,"%s\n",header);
-
-%{
-for i=1:harmonicsN
-    fprintf(ascFile,"%s%d%s\n",wire1,i*300,wire2);
-end
-
-for i=1:harmonicsN
-    fprintf(ascFile,"%s%d%s\n",flag1,i*300,flag2);
-end
-%}
 
 fprintf(ascFile,"%s%d%s\n",flag1,(harmonicsN+1)*80+16,flag2);
 fprintf(ascFile,"%s %d %s%d %s %f %s\n\n",symbol1,80,symbol2,1,symbol3b,blackmanSpectrumLinear(i),symbol4);
@@ -329,7 +312,7 @@ for i=2:harmonicsN
     if(blackmanSpectrumLinear(i)<0.000001)
         continue;
     end
-    fprintf(ascFile,"%s %d %s%d %s %f %fMeg 0 0 %f %s\n\n",symbol1,i*80,symbol2,i,symbol3,blackmanSpectrumLinear(i),blackmanf(i),blackmanPhase(i),symbol4);
+    fprintf(ascFile,"%s %d %s%d %s %f %fMeg 0 0 %f) %s\n\n",symbol1,i*80,symbol2,i,symbol3,blackmanSpectrumLinear(i),blackmanf(i),blackmanPhase(i),symbol4);
 end
 
 fclose(ascFile);
