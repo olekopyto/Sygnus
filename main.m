@@ -25,13 +25,37 @@ function [frequencies, P1_dB, phase, P2]= fftLog(signal, time)
     
     phaseDoubleSide = angle(Y);
     phaseRad = phaseDoubleSide(1:floor(N/2)+1);
-    phase = unwrap(phaseRad)*(180/pi);
+    phase = unwrap(phaseRad)*(180/pi); %unwrap(phaseRad)*
     P1_dB = 20 * log10(P1);
     P1_dB(isinf(P1_dB)) = -160;  % Uzyskane w transformacie wartośći -Inf zrzuca do -160 dB
     
     frequencies = f;
     
 end
+
+function bandwidth = SpectrumAccuracy(spectrum, frequencies, desiredAccuracy)
+    spectrumSum = 0;
+
+     for i = 1:length(frequencies)
+        spectrumSum = spectrumSum +  spectrum(i);   
+    end
+
+    spectrumSubSum = 0;
+    bandwidth = 0;
+    display(spectrumSum);
+    for i = 1:length(frequencies)
+        spectrumSubSum = spectrumSubSum + spectrum(i);
+        
+        fprintf('Frequency: %f, SpectrumSubSum: %f\n', frequencies(i), spectrumSubSum);
+        if spectrumSubSum >= spectrumSum * (1-desiredAccuracy)
+            bandwidth = frequencies(i);
+            break;
+        end
+    end
+end
+
+
+
 
 
 %program pyta użytkownika o nazwę pliku
@@ -55,7 +79,7 @@ head(dataTable);
 time = dataTable.Var1;
 signalOrg = dataTable.Var2;
 
-%odczyt max amplitudy
+%inicjalizacja
 maxAmp=0;
 maxIte = 0;
 maxTime = 0;
@@ -85,17 +109,19 @@ disp(maxAmp);
 %obliczanie czasu trwania i energii impulsu
 %czas trwania definiujemy jako czas kiedy amplituda impulsu
 %jest wyższa niż pół amplitud maksymalnej
-pulseWidthI = find(signalNoOffset >= 0.5*maxAmp);
-pulseWidthTime = time(pulseWidthI(end) - pulseWidthI(1));
+halfMaxAmp = abs(0.5*maxAmp);
+disp(halfMaxAmp);
+pulseWidthI = find(abs(signalNoOffset) > halfMaxAmp);
+pulseWidthTime = time(pulseWidthI(end)) - time(pulseWidthI(1));
 %zakładamy, że dostarczony sygnał jest napięciem.
 %tutaj energia jest całką kwadratu amplitudy po czasie, podzieloną przez opór.
 %Przedstawiam dla oporów 1 Ohm i 50 Ohm.
-energy1Ohm = trapz(time, signalNoOffset.^2);
+energy1Ohm = trapz(time(pulseWidthI(1):pulseWidthI(end)), signalNoOffset(pulseWidthI(1):pulseWidthI(end)).^2);
 energy50Ohm = energy1Ohm/50;
 %pole pod pulsem
-area = trapz(time, signalNoOffset);
+area = trapz(time(pulseWidthI(1):pulseWidthI(end)), signalNoOffset(pulseWidthI(1):pulseWidthI(end)));
 
-%normalizacja amplitudy, wyzbycie się offsetu DC
+%normalizacja amplitudy
 signal = signalNoOffset/maxAmp;
 
 %obliczanie czasu wzrastania/opadania
@@ -127,6 +153,7 @@ disp(edgeRise1);
 disp(edgeRise2);
 disp(edgeFall1);
 disp(edgeFall2);
+
 pulseLength = time(edgeRise2) - time(edgeRise1);
 timePulse = time(edgeRise1:edgeFall2);
 signalPulse = signal(edgeRise1:edgeFall2);
@@ -173,10 +200,24 @@ blackmanPulse = blackmanPulse*blackmanNormalisationFactor;
 
 blackmanfMax = max(blackmanSpectrumLinear);
 blackmanf3dB = blackmanfMax/sqrt(2);
-indices = find(blackmanf>=blackmanf3dB);
+blackmanf3dBLog = max(blackmanSpectrum) - 3;
+indices = find(blackmanSpectrum>=blackmanf3dBLog);
 blackman3dBMin=blackmanf(indices(1));
 blackman3dBMax=blackmanf(indices(end));
 
+
+
+%wyznaczenie pasm dokładności
+bit10 = 0.001;
+bit12 = 0.00025;
+bit14 = 0.00006;
+
+bandwidth10 = SpectrumAccuracy(blackmanSpectrumLinear, blackmanf, bit10);
+bandwidth12 = SpectrumAccuracy(blackmanSpectrumLinear, blackmanf, bit12);
+bandwidth14 = SpectrumAccuracy(blackmanSpectrumLinear, blackmanf, bit14);
+display(bandwidth10);
+display(bandwidth12);
+display(bandwidth14);
 
 % multiplot.........................................................
 figure;
@@ -205,15 +246,31 @@ ylabel('Faza [deg]');
 
 % Spektrum w dB
 subplot(2, 2, 1);
+
 semilogx(blackmanf, blackmanSpectrum);
+grid minor;
 title('Spectrum sygnału [dB]');
 xlabel('Częstotliwość [MHz]');
 ylabel('Natężenie [dB]');
 title('Spektrum częst. z transformaty FFT');
-
+x3dbY = yline(blackmanf3dBLog, 'r--', blackmanf3dBLog+ " dBV, -3dB cutoff");
+x3dbY.LabelVerticalAlignment = 'bottom';
+x3dbY.LabelHorizontalAlignment = 'center';
+x3dbF = xline(blackman3dBMax,'r--',blackman3dBMax+ " MHz");
+x3dbF.LabelVerticalAlignment = 'middle';
+x10 = xline(bandwidth10,'b--',bandwidth10 + " MHz, 10bit");
+x10.LabelHorizontalAlignment = 'left';
+x10.LabelVerticalAlignment = 'middle';
+x12 = xline(bandwidth12,'b--',bandwidth12+ " MHz, 12bit");
+x12.LabelHorizontalAlignment = 'left';
+x12.LabelVerticalAlignment = 'middle';
+x14 = xline(bandwidth14,'b--',bandwidth14+ " MHz, 14bit");
+x14.LabelHorizontalAlignment = 'right';
+x14.LabelVerticalAlignment = 'middle';
 % Wykres sygnału
 subplot(2, 2, 2);
 plot(towindowTime, blackmanPulse);
+grid minor;
 title('Sygnał po normalizacji');
 xlabel('Czas [s]');
 ylabel('Natężenie [V]');
@@ -222,6 +279,7 @@ ylabel('Natężenie [V]');
 
 subplot(2, 2, 3);
 semilogx(blackmanf, blackmanPhase);
+grid minor;
 title('Spektrum faz z transformaty FFT');
 xlabel('Częstotliwość [MHz]');
 ylabel('Faza [deg]');
@@ -231,9 +289,16 @@ ylabel('Faza [deg]');
 subplot(2, 2, 4);
 
 plot(time, signalNoOffset);
+grid minor;
 title('Sygnał Orginalny');
 xlabel('Czas [s]');
 ylabel('Natężenie');
+xImpBeg = xline(time(pulseWidthI(1)),'r--',"Pocz. całkowania");
+xImpBeg.LabelHorizontalAlignment="left";
+xImpBeg.LabelVerticalAlignment="bottom";
+xImpEnd = xline(time(pulseWidthI(end)),'r--',"Koniec całkowania");
+xImpEnd.LabelVerticalAlignment="bottom";
+xImpEnd.LabelHorizontalAlignment="right";
 
 %%zapis wyników analizy do pliku....................................
 
@@ -248,7 +313,8 @@ fprintf(outFile,"%s %g\n","Maksymalna amplituda impulsu [V]:", maxAmp);
 fprintf(outFile,"%s %g\n","Chwila maksimum sygnału [s]:", maxTime);
 fprintf(outFile,"%s %g %g\n","Energia impulsu dla 1 Ohm i 50 Ohm impedancji odbiornika impulsu [J]:", energy1Ohm, energy50Ohm);
 fprintf(outFile,"%s %g\n","Pole powierzchni impulsu [V*s]:", area);
-fprintf(outFile,"%s %g \n","Pasmo -3dB [MHz]: ", blackman3dBMax/1000);
+fprintf(outFile,"%s %g \n","Pasmo -3dB [MHz]: ", blackman3dBMax);
+fprintf(outFile,"%s %g, %g, %g \n","Pasma dokładności (10, 12, 14 bit) [MHz]: ", bandwidth10, bandwidth12, bandwidth14);
 fprintf(outFile,"Tableka harmonicznych: \n");
 fprintf(outFile,"%s\n","Częstotliwość [Hz], amplituda [dBV], amplituda [V], faza [°]");
 for i=1:harmonicsN
@@ -329,3 +395,4 @@ disp( ...
     +filename{1} ...
     +".asc" ...
 );
+
