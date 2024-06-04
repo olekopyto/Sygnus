@@ -59,6 +59,8 @@ end
 
 
 %program pyta użytkownika o nazwę pliku
+
+harmonicsN = 400; %liczba 
 prompt = {'Proszę podać nazwę pliku csv, w folderze skryptu, do odczytu.'};
 dlgtitle = 'Nazwa wymagana.';
 dims = [1 35];
@@ -191,7 +193,7 @@ blackmanPulse = towindowPulse .* blackman(length(towindowPulse));
 blackmanNormalisationFactor = length(towindowPulse)/sum(blackman(length(towindowPulse)));
 
 blackmanPulse = blackmanPulse*blackmanNormalisationFactor;
-
+%blackmanPulse = blackmanPulse+offsetDC;
 %%transformata FFT
 [f, P1_dB, phase] = fftLog(signal, time);
 [blackmanf, blackmanSpectrum, blackmanPhase, blackmanSpectrumLinear] = fftLog(blackmanPulse, towindowTime);
@@ -302,7 +304,7 @@ xImpEnd.LabelHorizontalAlignment="right";
 
 %%zapis wyników analizy do pliku....................................
 
-harmonicsN = 40; %liczba 
+
 
 outFile = fopen(filename{1}+"_out.txt","w+");
 fprintf(outFile,"%s\n",datetime("now"));
@@ -336,12 +338,41 @@ if(csvFile == -1)
 end
 fprintf(csvFile,"%s\n","freq [Hz], amplitude [dBV], linear amplitude [V], phase [°]");
 for i=1:harmonicsN
-    fprintf(outFile,"%f,%f,%f,%f\n",10E5*blackmanf(i),blackmanSpectrum(i),blackmanSpectrumLinear(i),mod(blackmanPhase(i),360));
+    fprintf(csvFile,"%f,%f,%f,%f\n",10E5*blackmanf(i),blackmanSpectrum(i),blackmanSpectrumLinear(i),mod(blackmanPhase(i),360));
 end
 fclose(csvFile);
 
+libFile = fopen("AliceSignal.sub","w"); %filename{1}+".sub"
+if(libFile == -1)
+    error("Proszę zamknąć program korzystający z pliku "+filename{1}+".asc");
+end
+
+header = ".subckt AliceSignal p n";
+fprintf(libFile,"%s\n",header);
+
+for i=2:harmonicsN
+    if(blackmanSpectrumLinear(i)<0.000001)
+        continue;
+    end
+    fprintf(libFile,"V%d p_aux%d 0 SIN(0 %f %fMeg 0 0 %f)\n",i,i,blackmanSpectrumLinear(i),blackmanf(i),blackmanPhase(i)+90);
+
+end
+
+fprintf(libFile,"B1 p n V = %f",blackmanSpectrumLinear(i));
+
+for i=2:harmonicsN
+    if(blackmanSpectrumLinear(i)<0.000001)
+        continue;
+    end
+    fprintf(libFile," + V(p_aux%d,0)",i);
+
+end
+fclose(libFile);
 %generacja pliku symulacji do LTSpice................................
-ascFile = fopen(filename{1}+".asc","w+");
+
+%{
+
+ascFile = fopen(filename{1}+"a.asc","w+");
 
 if(ascFile == -1)
     error("Proszę zamknąć program korzystający z pliku "+filename{1}+".asc");
@@ -378,10 +409,15 @@ for i=2:harmonicsN
     if(blackmanSpectrumLinear(i)<0.000001)
         continue;
     end
-    fprintf(ascFile,"%s %d %s%d %s %f %fMeg 0 0 %f) %s\n\n",symbol1,i*80,symbol2,i,symbol3,blackmanSpectrumLinear(i),blackmanf(i),blackmanPhase(i),symbol4);
+    fprintf(ascFile,"%s %d %s%d %s %f %fMeg 0 0 %f) %s\n\n",symbol1,i*80,symbol2,i,symbol3,blackmanSpectrumLinear(i),blackmanf(i),blackmanPhase(i)+90,symbol4);
 end
 
 fclose(ascFile);
+
+%}
+
+
+
 disp( ...
     "Analiza skończona, wyniki zapisano do " ...
     +filename{1} ...
